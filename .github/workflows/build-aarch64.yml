@@ -36,7 +36,8 @@ jobs:
               libwpewebkit-2.0-dev \
               libepoxy-dev libdrm-dev libinput-dev libudev-dev \
               libgbm-dev libegl-dev libgles2-mesa-dev \
-              libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev
+              libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev \
+              libwayland-dev libwayland-server0
 
           run: |
             cd /workspace
