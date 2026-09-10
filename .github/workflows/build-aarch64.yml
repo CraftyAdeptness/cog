@@ -39,6 +39,7 @@ jobs:
               cp build/launcher/cog /workspace/artifacts/ || true
               cp build/launcher/cogctl /workspace/artifacts/ || true
               find build -iname "*drm*.so*" -exec cp -v {} /workspace/artifacts/ \;
+              find build -iname "libcogcore.so*" -exec cp -v {} /workspace/artifacts/ \;
               echo "=== Verifying architecture of built artifacts ==="
               file /workspace/artifacts/*
             '
