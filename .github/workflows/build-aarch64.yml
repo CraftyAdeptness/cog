@@ -25,7 +25,7 @@ jobs:
               set -e
               apt-get update -q -y
               apt-get install -q -y --no-install-recommends \
-                build-essential meson ninja-build pkg-config git \
+                build-essential meson ninja-build pkg-config git file \
                 libwpe-1.0-dev libwpebackend-fdo-1.0-dev \
                 libwpewebkit-2.0-dev \
                 libepoxy-dev libdrm-dev libinput-dev libudev-dev \
@@ -36,8 +36,8 @@ jobs:
               meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
               ninja -C build
               mkdir -p /workspace/artifacts
-              cp build/cog /workspace/artifacts/ || true
-              cp build/cogctl /workspace/artifacts/ || true
+              cp build/launcher/cog /workspace/artifacts/ || true
+              cp build/launcher/cogctl /workspace/artifacts/ || true
               find build -iname "*drm*.so*" -exec cp -v {} /workspace/artifacts/ \;
               echo "=== Verifying architecture of built artifacts ==="
               file /workspace/artifacts/*
