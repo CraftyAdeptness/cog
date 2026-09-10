@@ -12,15 +12,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build inside emulated aarch64 Debian trixie
-        uses: uraimo/run-on-arch-action@v2
+        uses: uraimo/run-on-arch-action@v3
         id: build
         with:
           arch: aarch64
-          distro: trixie
+          base_image: debian:trixie
           githubToken: ${{ github.token }}
-          # Cache apt packages between runs so it's not slow every time
+
+          # Create the artifacts dir on the HOST before the container runs
+          setup: |
+            mkdir -p "${PWD}/artifacts"
+
+          # Mount the checked-out source and the artifacts dir into the container
           dockerRunArgs: |
-            --volume "${{ github.workspace }}:/workspace"
+            --volume "${PWD}:/workspace"
+            --volume "${PWD}/artifacts:/artifacts"
+
           install: |
             apt-get update -q -y
             apt-get install -q -y --no-install-recommends \
@@ -30,14 +37,14 @@ jobs:
               libepoxy-dev libdrm-dev libinput-dev libudev-dev \
               libgbm-dev libegl-dev libgles2-mesa-dev \
               libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev
+
           run: |
             cd /workspace
             meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
             ninja -C build
-            mkdir -p /workspace/artifacts
-            cp build/cog /workspace/artifacts/ || true
-            cp build/cogctl /workspace/artifacts/ || true
-            find build -iname '*drm*.so*' -exec cp -v {} /workspace/artifacts/ \;
+            cp build/cog /artifacts/ || true
+            cp build/cogctl /artifacts/ || true
+            find build -iname '*drm*.so*' -exec cp -v {} /artifacts/ \;
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
