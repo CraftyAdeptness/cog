@@ -1,0 +1,38 @@
+diff --git a/platform/drm/cog-drm-gles-renderer.c b/platform/drm/cog-drm-gles-renderer.c
+index 71dbbcb..ee0061d 100644
+--- a/platform/drm/cog-drm-gles-renderer.c
++++ b/platform/drm/cog-drm-gles-renderer.c
+@@ -14,6 +14,7 @@
+ #include <errno.h>
+ #include <gbm.h>
+ #include <glib-unix.h>
++#include <string.h>
+ #include <wayland-util.h>
+ #include <wpe/fdo-egl.h>
+ #include <wpe/fdo.h>
+@@ -282,7 +283,24 @@ cog_drm_gles_renderer_initialize(CogDrmRenderer *renderer, GError **error)
+         return false;
+     }
+ 
+-    if (epoxy_has_egl_extension(self->egl_display, "EGL_MESA_platform_gbm")) {
++    /*
++     * EGL_{KHR,MESA}_platform_gbm are CLIENT extensions: per the Khronos
++     * EGL_EXT_platform_base spec they only make sense before a display
++     * exists, so they must be queried against EGL_NO_DISPLAY. Querying
++     * them against an already-initialized EGLDisplay (as upstream did
++     * here, MESA-only) always returns false on drivers that never list
++     * them there -- e.g. the proprietary ARM Mali (Bifrost) blob, which
++     * only advertises EGL_KHR_platform_gbm, and only as a client
++     * extension. That silently pushed every Mali-based board onto the
++     * legacy eglCreateWindowSurface() fallback below, which does not
++     * reliably accept a raw gbm_surface* cast as EGLNativeWindowType on
++     * that driver and crashes or misbehaves.
++     */
++    const char *client_exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
++    gboolean    has_platform_gbm = client_exts && (strstr(client_exts, "EGL_KHR_platform_gbm") ||
++                                                 strstr(client_exts, "EGL_MESA_platform_gbm"));
++
++    if (has_platform_gbm) {
+         self->egl_surface =
+             eglCreatePlatformWindowSurfaceEXT(self->egl_display, self->egl_config, self->gbm_surface, NULL);
+     } else {

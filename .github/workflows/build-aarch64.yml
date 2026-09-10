@@ -1,0 +1,46 @@
+name: Build Cog (aarch64, Mali GBM fix)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ mali-gbm-fix ]
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build inside emulated aarch64 Debian trixie
+        uses: uraimo/run-on-arch-action@v2
+        id: build
+        with:
+          arch: aarch64
+          distro: trixie
+          githubToken: ${{ github.token }}
+          # Cache apt packages between runs so it's not slow every time
+          dockerRunArgs: |
+            --volume "${{ github.workspace }}:/workspace"
+          install: |
+            apt-get update -q -y
+            apt-get install -q -y --no-install-recommends \
+              build-essential meson ninja-build pkg-config git \
+              libwpe-1.0-dev libwpebackend-fdo-1.0-dev \
+              libwpewebkit-2.0-dev \
+              libepoxy-dev libdrm-dev libinput-dev libudev-dev \
+              libgbm-dev libegl-dev libgles2-mesa-dev \
+              libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev
+          run: |
+            cd /workspace
+            meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
+            ninja -C build
+            mkdir -p /workspace/artifacts
+            cp build/cog /workspace/artifacts/ || true
+            cp build/cogctl /workspace/artifacts/ || true
+            find build -iname '*drm*.so*' -exec cp -v {} /workspace/artifacts/ \;
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cog-aarch64-mali-fix
+          path: artifacts/*
