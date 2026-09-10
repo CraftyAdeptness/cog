@@ -11,41 +11,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build inside emulated aarch64 Debian trixie
-        uses: uraimo/run-on-arch-action@v3
-        id: build
+      - name: Set up QEMU for aarch64 emulation
+        uses: docker/setup-qemu-action@v3
         with:
-          arch: aarch64
-          base_image: debian:trixie
-          githubToken: ${{ github.token }}
+          platforms: arm64
 
-          # Create the artifacts dir on the HOST before the container runs
-          setup: |
-            mkdir -p "${PWD}/artifacts"
-
-          # Mount the checked-out source and the artifacts dir into the container
-          dockerRunArgs: |
-            --volume "${PWD}:/workspace"
-            --volume "${PWD}/artifacts:/artifacts"
-
-          install: |
-            apt-get update -q -y
-            apt-get install -q -y --no-install-recommends \
-              build-essential meson ninja-build pkg-config git \
-              libwpe-1.0-dev libwpebackend-fdo-1.0-dev \
-              libwpewebkit-2.0-dev \
-              libepoxy-dev libdrm-dev libinput-dev libudev-dev \
-              libgbm-dev libegl-dev libgles2-mesa-dev \
-              libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev \
-              libwayland-dev libwayland-server0
-
-          run: |
-            cd /workspace
-            meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
-            ninja -C build
-            cp build/cog /artifacts/ || true
-            cp build/cogctl /artifacts/ || true
-            find build -iname '*drm*.so*' -exec cp -v {} /artifacts/ \;
+      - name: Build inside emulated aarch64 Debian trixie
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "${{ github.workspace }}:/workspace" \
+            debian:trixie \
+            bash -c '
+              set -e
+              apt-get update -q -y
+              apt-get install -q -y --no-install-recommends \
+                build-essential meson ninja-build pkg-config git \
+                libwpe-1.0-dev libwpebackend-fdo-1.0-dev \
+                libwpewebkit-2.0-dev \
+                libepoxy-dev libdrm-dev libinput-dev libudev-dev \
+                libgbm-dev libegl-dev libgles2-mesa-dev \
+                libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev \
+                libwayland-dev libwayland-server0
+              cd /workspace
+              meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
+              ninja -C build
+              mkdir -p /workspace/artifacts
+              cp build/cog /workspace/artifacts/ || true
+              cp build/cogctl /workspace/artifacts/ || true
+              find build -iname "*drm*.so*" -exec cp -v {} /workspace/artifacts/ \;
+              echo "=== Verifying architecture of built artifacts ==="
+              file /workspace/artifacts/*
+            '
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
