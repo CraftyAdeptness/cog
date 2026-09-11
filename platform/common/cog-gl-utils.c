@@ -8,6 +8,27 @@
 #include "cog-gl-utils.h"
 
 #include "../../core/cog.h"
+#include <string.h>
+
+/*
+ * epoxy_has_gl_extension() misreports GL_OES_EGL_image as absent on at
+ * least one proprietary ARM Mali (Bifrost) driver setup, even though the
+ * driver genuinely supports it (confirmed directly with glGetString()).
+ * This is very likely related to malformed .dynsym tables observed in
+ * that driver's libEGL.so/libGLESv2.so (visible as linker warnings at
+ * build time: ".dynsym local symbol at index N (>= sh_info of 3)"),
+ * which can confuse dlopen/dlsym-based dispatch like epoxy's, even
+ * though normal dynamic linking against the same libraries works fine.
+ *
+ * To sidestep this, query the extension string directly instead of
+ * going through epoxy's extension cache.
+ */
+static gboolean
+gl_has_extension_direct(const char *name)
+{
+    const char *exts = (const char *)glGetString(GL_EXTENSIONS);
+    return exts && strstr(exts, name) != NULL;
+}
 
 void
 cog_gl_shader_id_destroy(CogGLShaderId *shader_id)
@@ -90,7 +111,7 @@ cog_gl_renderer_initialize(CogGLRenderer *self, GError **error)
         "GL_OES_EGL_image",
     };
     for (unsigned i = 0; i < G_N_ELEMENTS(required_gl_extensions); i++) {
-        if (!epoxy_has_gl_extension(required_gl_extensions[i])) {
+        if (!gl_has_extension_direct(required_gl_extensions[i])) {
             g_set_error(error, COG_PLATFORM_WPE_ERROR, COG_PLATFORM_WPE_ERROR_INIT, "GL extension %s missing",
                         required_gl_extensions[i]);
             return false;
