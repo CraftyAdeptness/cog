@@ -8,25 +8,49 @@
 #include "cog-gl-utils.h"
 
 #include "../../core/cog.h"
+#include <dlfcn.h>
 #include <string.h>
 
 /*
- * epoxy_has_gl_extension() misreports GL_OES_EGL_image as absent on at
- * least one proprietary ARM Mali (Bifrost) driver setup, even though the
- * driver genuinely supports it (confirmed directly with glGetString()).
- * This is very likely related to malformed .dynsym tables observed in
- * that driver's libEGL.so/libGLESv2.so (visible as linker warnings at
- * build time: ".dynsym local symbol at index N (>= sh_info of 3)"),
- * which can confuse dlopen/dlsym-based dispatch like epoxy's, even
- * though normal dynamic linking against the same libraries works fine.
+ * epoxy's dispatch for glGetString() itself resolves incorrectly on at
+ * least one proprietary ARM Mali (Bifrost) driver setup: EGL client-type
+ * queries (EGL_CONTEXT_CLIENT_TYPE / EGL_CONTEXT_CLIENT_VERSION) all
+ * correctly report an OpenGL ES 2 context is current, yet epoxy's
+ * generated "core function" resolver (epoxy_get_core_proc_address(),
+ * used for old/core entry points like glGetString) unconditionally
+ * dlsym()s them from the DESKTOP GL library on this platform, which has
+ * no current context and so returns NULL/empty results. This is very
+ * likely related to malformed .dynsym tables observed in this driver's
+ * libEGL.so/libGLESv2.so (visible as linker warnings at build time:
+ * ".dynsym local symbol at index N (>= sh_info of 3)").
  *
- * To sidestep this, query the extension string directly instead of
- * going through epoxy's extension cache.
+ * epoxy/gl.h -- included by cog-gl-utils.h -- macro-redefines
+ * glGetString itself, so simply calling "glGetString" from this file
+ * still goes through the same broken epoxy dispatch; it does NOT bypass
+ * it. To get a genuinely direct answer we resolve the real symbol
+ * ourselves from libGLESv2.so.2 via dlopen/dlsym, exactly mirroring how
+ * a normal dynamically-linked GLES application would resolve it (which
+ * is confirmed to work correctly against this same driver).
  */
 static gboolean
 gl_has_extension_direct(const char *name)
 {
-    const char *exts = (const char *)glGetString(GL_EXTENSIONS);
+    static const GLubyte *(*real_glGetString)(GLenum) = NULL;
+    static gboolean       resolved = FALSE;
+
+    if (!resolved) {
+        resolved = TRUE;
+        void *handle = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
+        if (handle)
+            real_glGetString = dlsym(handle, "glGetString");
+        if (!real_glGetString)
+            g_warning("gl_has_extension_direct: could not resolve real glGetString (%s)", dlerror());
+    }
+
+    if (!real_glGetString)
+        return FALSE;
+
+    const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
     return exts && strstr(exts, name) != NULL;
 }
 
