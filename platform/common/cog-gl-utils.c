@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#define _GNU_SOURCE /* for dlinfo()/RTLD_DI_LINKMAP, a glibc extension */
+
 #include "cog-gl-utils.h"
 
 #include "../../core/cog.h"
