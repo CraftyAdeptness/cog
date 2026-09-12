@@ -9,6 +9,7 @@
 
 #include "../../core/cog.h"
 #include <dlfcn.h>
+#include <link.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -62,6 +63,29 @@ gl_has_extension_direct(const char *name)
             real_glGetString = dlsym(handle, "glGetString");
             fprintf(stderr, "[gl_has_extension_direct] dlsym(\"glGetString\") = %p, dlerror=%s\n",
                     (void *)real_glGetString, dlerror());
+
+            struct link_map *lm = NULL;
+            if (dlinfo(handle, RTLD_DI_LINKMAP, &lm) == 0 && lm) {
+                fprintf(stderr, "[gl_has_extension_direct] our dlopen'd libGLESv2.so.2 real path = %s\n", lm->l_name);
+            } else {
+                fprintf(stderr, "[gl_has_extension_direct] dlinfo(RTLD_DI_LINKMAP) failed: %s\n", dlerror());
+            }
+        }
+
+        /* Enumerate ALL mapped modules matching GLESv2/EGL/mali in this
+         * process, in case more than one copy of these libraries is
+         * loaded simultaneously (e.g. one pulled in by WebKit itself
+         * through a different path than the one our own dlopen finds). */
+        FILE *maps = fopen("/proc/self/maps", "r");
+        if (maps) {
+            char line[512];
+            fprintf(stderr, "[gl_has_extension_direct] --- /proc/self/maps entries matching GLESv2/EGL/mali ---\n");
+            while (fgets(line, sizeof(line), maps)) {
+                if (strstr(line, "GLESv2") || strstr(line, "libEGL") || strstr(line, "mali"))
+                    fprintf(stderr, "  %s", line);
+            }
+            fclose(maps);
+            fprintf(stderr, "[gl_has_extension_direct] --- end maps ---\n");
         }
     }
 
@@ -72,8 +96,7 @@ gl_has_extension_direct(const char *name)
 
     const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
     fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_EXTENSIONS) = %s\n",
-            exts ? exts : "(NULL)");
-    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
+            exts ? exts : "(NULL)");    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
                     "eglGetCurrentSurface(DRAW)=%p glGetError()=0x%x\n",
             (void *)eglGetCurrentContext(), (void *)eglGetCurrentDisplay(),
             (void *)eglGetCurrentSurface(EGL_DRAW), real_glGetString ? 0u : 0u);
