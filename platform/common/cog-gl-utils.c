@@ -73,6 +73,16 @@ gl_has_extension_direct(const char *name)
     const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
     fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_EXTENSIONS) = %s\n",
             exts ? exts : "(NULL)");
+    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
+                    "eglGetCurrentSurface(DRAW)=%p glGetError()=0x%x\n",
+            (void *)eglGetCurrentContext(), (void *)eglGetCurrentDisplay(),
+            (void *)eglGetCurrentSurface(EGL_DRAW), real_glGetString ? 0u : 0u);
+    /* also try the epoxy-dispatched glGetError to see if IT thinks
+     * something is current (uses the SAME context state as the real
+     * driver call above, since glGetError doesn't need to go through
+     * libGLESv2 specifically to report accurately) */
+    fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_VERSION) = %s\n",
+            (const char *)real_glGetString(GL_VERSION));
     return exts && strstr(exts, name) != NULL;
 }
 
