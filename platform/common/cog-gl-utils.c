@@ -39,6 +39,16 @@
 static gboolean
 gl_has_extension_direct(const char *name)
 {
+    /* FIRST THING, before touching any dlopen: check what EGL_VENDOR the
+     * currently-current display already reports, using ONLY functions
+     * epoxy already has resolved (no new dlopen calls yet), to rule out
+     * whether our own dlopen() calls further below are themselves the
+     * ones disturbing the current context. */
+    fprintf(stderr, "[gl_has_extension_direct] ENTRY: eglGetCurrentDisplay()=%p eglGetCurrentContext()=%p "
+                    "EGL_VENDOR(via epoxy)=%s\n",
+            (void *)eglGetCurrentDisplay(), (void *)eglGetCurrentContext(),
+            eglQueryString(eglGetCurrentDisplay(), EGL_VENDOR));
+
     static const GLubyte *(*real_glGetString)(GLenum) = NULL;
     static gboolean       resolved = FALSE;
 
