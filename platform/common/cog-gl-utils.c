@@ -98,16 +98,35 @@ gl_has_extension_direct(const char *name)
 
     const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
     fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_EXTENSIONS) = %s\n",
-            exts ? exts : "(NULL)");    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
+            exts ? exts : "(NULL)");
+    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
                     "eglGetCurrentSurface(DRAW)=%p glGetError()=0x%x\n",
             (void *)eglGetCurrentContext(), (void *)eglGetCurrentDisplay(),
             (void *)eglGetCurrentSurface(EGL_DRAW), real_glGetString ? 0u : 0u);
-    /* also try the epoxy-dispatched glGetError to see if IT thinks
-     * something is current (uses the SAME context state as the real
-     * driver call above, since glGetError doesn't need to go through
-     * libGLESv2 specifically to report accurately) */
     fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_VERSION) = %s\n",
             (const char *)real_glGetString(GL_VERSION));
+
+    /* Resolve eglQueryString directly too (bypassing epoxy's EGL dispatch),
+     * to see which vendor's EGL is ACTUALLY backing the currently-current
+     * context/display at this exact point -- in case something else (e.g.
+     * WebKit's own compositor setup) replaced Cog's Mali context with a
+     * different, software-Mesa one on this same thread before this check
+     * runs (note: libEGL_mesa.so.0.0.0 and libEGL.so.1.1.0 both appeared
+     * in /proc/self/maps above, alongside the real Mali blob). */
+    {
+        void *egl_handle = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+        const char *(*real_eglQueryString)(void *, int) =
+            egl_handle ? dlsym(egl_handle, "eglQueryString") : NULL;
+        if (real_eglQueryString) {
+            const char *vendor = real_eglQueryString(eglGetCurrentDisplay(), EGL_VENDOR);
+            const char *version = real_eglQueryString(eglGetCurrentDisplay(), EGL_VERSION);
+            fprintf(stderr, "[gl_has_extension_direct] REAL current EGL_VENDOR=%s EGL_VERSION=%s\n",
+                    vendor ? vendor : "(NULL)", version ? version : "(NULL)");
+        } else {
+            fprintf(stderr, "[gl_has_extension_direct] could not resolve real eglQueryString\n");
+        }
+    }
+
     return exts && strstr(exts, name) != NULL;
 }
 
