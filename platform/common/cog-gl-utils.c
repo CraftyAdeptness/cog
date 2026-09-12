@@ -9,6 +9,7 @@
 
 #include "../../core/cog.h"
 #include <dlfcn.h>
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -40,17 +41,38 @@ gl_has_extension_direct(const char *name)
 
     if (!resolved) {
         resolved = TRUE;
+        dlerror(); /* clear any pending error */
         void *handle = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
-        if (handle)
+        fprintf(stderr, "[gl_has_extension_direct] dlopen(\"libGLESv2.so.2\", RTLD_NOW) = %p, dlerror=%s\n",
+                handle, dlerror());
+        if (!handle) {
+            /* RTLD_NOW forces eager symbol resolution; this driver's
+             * .dynsym table is known to be malformed, which can make
+             * eager resolution fail even though lazy binding (what the
+             * dynamic linker used for our normal, already-working
+             * dependency on this same library) tolerates it fine. Retry
+             * with RTLD_LAZY before giving up. */
+            dlerror();
+            handle = dlopen("libGLESv2.so.2", RTLD_LAZY | RTLD_GLOBAL);
+            fprintf(stderr, "[gl_has_extension_direct] retry dlopen(RTLD_LAZY) = %p, dlerror=%s\n",
+                    handle, dlerror());
+        }
+        if (handle) {
+            dlerror();
             real_glGetString = dlsym(handle, "glGetString");
-        if (!real_glGetString)
-            g_warning("gl_has_extension_direct: could not resolve real glGetString (%s)", dlerror());
+            fprintf(stderr, "[gl_has_extension_direct] dlsym(\"glGetString\") = %p, dlerror=%s\n",
+                    (void *)real_glGetString, dlerror());
+        }
     }
 
-    if (!real_glGetString)
+    if (!real_glGetString) {
+        fprintf(stderr, "[gl_has_extension_direct] real_glGetString is NULL, returning FALSE for \"%s\"\n", name);
         return FALSE;
+    }
 
     const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
+    fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_EXTENSIONS) = %s\n",
+            exts ? exts : "(NULL)");
     return exts && strstr(exts, name) != NULL;
 }
 
