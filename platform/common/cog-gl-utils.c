@@ -5,138 +5,33 @@
  * SPDX-License-Identifier: MIT
  */
 
-#define _GNU_SOURCE /* for dlinfo()/RTLD_DI_LINKMAP, a glibc extension */
+#define _GNU_SOURCE
 
 #include "cog-gl-utils.h"
 
 #include "../../core/cog.h"
-#include <dlfcn.h>
-#include <link.h>
-#include <stdio.h>
+#include "../drm/cog-mali-dispatch.h"
 #include <string.h>
 
 /*
- * epoxy's dispatch for glGetString() itself resolves incorrectly on at
- * least one proprietary ARM Mali (Bifrost) driver setup: EGL client-type
- * queries (EGL_CONTEXT_CLIENT_TYPE / EGL_CONTEXT_CLIENT_VERSION) all
- * correctly report an OpenGL ES 2 context is current, yet epoxy's
- * generated "core function" resolver (epoxy_get_core_proc_address(),
- * used for old/core entry points like glGetString) unconditionally
- * dlsym()s them from the DESKTOP GL library on this platform, which has
- * no current context and so returns NULL/empty results. This is very
- * likely related to malformed .dynsym tables observed in this driver's
- * libEGL.so/libGLESv2.so (visible as linker warnings at build time:
- * ".dynsym local symbol at index N (>= sh_info of 3)").
- *
- * epoxy/gl.h -- included by cog-gl-utils.h -- macro-redefines
- * glGetString itself, so simply calling "glGetString" from this file
- * still goes through the same broken epoxy dispatch; it does NOT bypass
- * it. To get a genuinely direct answer we resolve the real symbol
- * ourselves from libGLESv2.so.2 via dlopen/dlsym, exactly mirroring how
- * a normal dynamically-linked GLES application would resolve it (which
- * is confirmed to work correctly against this same driver).
+ * NOTE: this file is shared with the x11/gtk4 platforms upstream, but
+ * this fork only builds `-Dplatforms=drm`, so pulling in the DRM-only
+ * Mali dispatch header here is safe for THIS build. If x11/gtk4 are
+ * ever re-enabled, this include (and the resulting glGetString/etc
+ * macro redirection to the Mali blob) needs to become DRM-specific.
+ */
+
+/*
+ * Simple, direct extension check using glGetString(), which now
+ * resolves (via cog-mali-dispatch.h, included below) straight to the
+ * Mali blob -- the same driver that creates and owns the actual
+ * current context in this DRM platform, avoiding the GLVND/epoxy
+ * cross-vendor mismatch that caused this to unreliably return NULL.
  */
 static gboolean
 gl_has_extension_direct(const char *name)
 {
-    /* FIRST THING, before touching any dlopen: check what EGL_VENDOR the
-     * currently-current display already reports, using ONLY functions
-     * epoxy already has resolved (no new dlopen calls yet), to rule out
-     * whether our own dlopen() calls further below are themselves the
-     * ones disturbing the current context. */
-    fprintf(stderr, "[gl_has_extension_direct] ENTRY: eglGetCurrentDisplay()=%p eglGetCurrentContext()=%p "
-                    "EGL_VENDOR(via epoxy)=%s\n",
-            (void *)eglGetCurrentDisplay(), (void *)eglGetCurrentContext(),
-            eglQueryString(eglGetCurrentDisplay(), EGL_VENDOR));
-
-    static const GLubyte *(*real_glGetString)(GLenum) = NULL;
-    static gboolean       resolved = FALSE;
-
-    if (!resolved) {
-        resolved = TRUE;
-        dlerror(); /* clear any pending error */
-        void *handle = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
-        fprintf(stderr, "[gl_has_extension_direct] dlopen(\"libGLESv2.so.2\", RTLD_NOW) = %p, dlerror=%s\n",
-                handle, dlerror());
-        if (!handle) {
-            /* RTLD_NOW forces eager symbol resolution; this driver's
-             * .dynsym table is known to be malformed, which can make
-             * eager resolution fail even though lazy binding (what the
-             * dynamic linker used for our normal, already-working
-             * dependency on this same library) tolerates it fine. Retry
-             * with RTLD_LAZY before giving up. */
-            dlerror();
-            handle = dlopen("libGLESv2.so.2", RTLD_LAZY | RTLD_GLOBAL);
-            fprintf(stderr, "[gl_has_extension_direct] retry dlopen(RTLD_LAZY) = %p, dlerror=%s\n",
-                    handle, dlerror());
-        }
-        if (handle) {
-            dlerror();
-            real_glGetString = dlsym(handle, "glGetString");
-            fprintf(stderr, "[gl_has_extension_direct] dlsym(\"glGetString\") = %p, dlerror=%s\n",
-                    (void *)real_glGetString, dlerror());
-
-            struct link_map *lm = NULL;
-            if (dlinfo(handle, RTLD_DI_LINKMAP, &lm) == 0 && lm) {
-                fprintf(stderr, "[gl_has_extension_direct] our dlopen'd libGLESv2.so.2 real path = %s\n", lm->l_name);
-            } else {
-                fprintf(stderr, "[gl_has_extension_direct] dlinfo(RTLD_DI_LINKMAP) failed: %s\n", dlerror());
-            }
-        }
-
-        /* Enumerate ALL mapped modules matching GLESv2/EGL/mali in this
-         * process, in case more than one copy of these libraries is
-         * loaded simultaneously (e.g. one pulled in by WebKit itself
-         * through a different path than the one our own dlopen finds). */
-        FILE *maps = fopen("/proc/self/maps", "r");
-        if (maps) {
-            char line[512];
-            fprintf(stderr, "[gl_has_extension_direct] --- /proc/self/maps entries matching GLESv2/EGL/mali ---\n");
-            while (fgets(line, sizeof(line), maps)) {
-                if (strstr(line, "GLESv2") || strstr(line, "libEGL") || strstr(line, "mali"))
-                    fprintf(stderr, "  %s", line);
-            }
-            fclose(maps);
-            fprintf(stderr, "[gl_has_extension_direct] --- end maps ---\n");
-        }
-    }
-
-    if (!real_glGetString) {
-        fprintf(stderr, "[gl_has_extension_direct] real_glGetString is NULL, returning FALSE for \"%s\"\n", name);
-        return FALSE;
-    }
-
-    const char *exts = (const char *)real_glGetString(GL_EXTENSIONS);
-    fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_EXTENSIONS) = %s\n",
-            exts ? exts : "(NULL)");
-    fprintf(stderr, "[gl_has_extension_direct] eglGetCurrentContext()=%p eglGetCurrentDisplay()=%p "
-                    "eglGetCurrentSurface(DRAW)=%p glGetError()=0x%x\n",
-            (void *)eglGetCurrentContext(), (void *)eglGetCurrentDisplay(),
-            (void *)eglGetCurrentSurface(EGL_DRAW), real_glGetString ? 0u : 0u);
-    fprintf(stderr, "[gl_has_extension_direct] real_glGetString(GL_VERSION) = %s\n",
-            (const char *)real_glGetString(GL_VERSION));
-
-    /* Resolve eglQueryString directly too (bypassing epoxy's EGL dispatch),
-     * to see which vendor's EGL is ACTUALLY backing the currently-current
-     * context/display at this exact point -- in case something else (e.g.
-     * WebKit's own compositor setup) replaced Cog's Mali context with a
-     * different, software-Mesa one on this same thread before this check
-     * runs (note: libEGL_mesa.so.0.0.0 and libEGL.so.1.1.0 both appeared
-     * in /proc/self/maps above, alongside the real Mali blob). */
-    {
-        void *egl_handle = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
-        const char *(*real_eglQueryString)(void *, int) =
-            egl_handle ? dlsym(egl_handle, "eglQueryString") : NULL;
-        if (real_eglQueryString) {
-            const char *vendor = real_eglQueryString(eglGetCurrentDisplay(), EGL_VENDOR);
-            const char *version = real_eglQueryString(eglGetCurrentDisplay(), EGL_VERSION);
-            fprintf(stderr, "[gl_has_extension_direct] REAL current EGL_VENDOR=%s EGL_VERSION=%s\n",
-                    vendor ? vendor : "(NULL)", version ? version : "(NULL)");
-        } else {
-            fprintf(stderr, "[gl_has_extension_direct] could not resolve real eglQueryString\n");
-        }
-    }
-
+    const char *exts = (const char *) glGetString(GL_EXTENSIONS);
     return exts && strstr(exts, name) != NULL;
 }
 
@@ -283,7 +178,7 @@ cog_gl_renderer_initialize(CogGLRenderer *self, GError **error)
     glBindTexture(GL_TEXTURE_2D, 0);
 
     /* Create vertex buffer */
-    if (epoxy_is_desktop_gl() || epoxy_gl_version() >= 30) {
+    if (gl_has_extension_direct("GL_OES_vertex_array_object")) {
         glGenVertexArrays(1, &self->vao);
         glBindVertexArray(self->vao);
     } else {

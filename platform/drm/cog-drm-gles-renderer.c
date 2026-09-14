@@ -21,6 +21,8 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "cog-mali-dispatch.h"
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(drmModePlane, drmModeFreePlane)
 
 typedef struct {

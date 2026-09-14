@@ -29,6 +29,7 @@
 #include <epoxy/egl.h>
 
 #include "../common/egl-proc-address.h"
+#include "cog-mali-dispatch.h"
 
 #ifndef LIBINPUT_CHECK_VERSION
 #    define LIBINPUT_CHECK_VERSION(a, b, c)                                                         \
@@ -745,14 +746,12 @@ clear_egl (void)
 static gboolean
 init_egl (void)
 {
-    static PFNEGLGETPLATFORMDISPLAYEXTPROC s_eglGetPlatformDisplay = NULL;
-    if (!s_eglGetPlatformDisplay)
-        s_eglGetPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYEXTPROC) load_egl_proc_address ("eglGetPlatformDisplayEXT");
-
-    if (s_eglGetPlatformDisplay)
-        egl_data.display = s_eglGetPlatformDisplay (EGL_PLATFORM_GBM_KHR, gbm_data.device, NULL);
-    else
-        egl_data.display = eglGetDisplay((EGLNativeDisplayType) gbm_data.device);
+    /* eglGetPlatformDisplayEXT here resolves (via the cog-mali-dispatch.h
+     * macro) to cog_mali_eglGetPlatformDisplayEXT, already obtained
+     * directly from the Mali blob's own eglGetProcAddress by
+     * cog_mali_dispatch_init() -- no separate/manual resolution needed
+     * anymore, and no risk of it routing through GLVND/Mesa instead. */
+    egl_data.display = eglGetPlatformDisplayEXT (EGL_PLATFORM_GBM_KHR, gbm_data.device, NULL);
 
     if (!egl_data.display) {
         clear_egl ();
@@ -1518,6 +1517,20 @@ cog_drm_platform_setup(CogPlatform *platform, CogShell *shell, const char *param
 {
     g_assert (platform);
     g_return_val_if_fail (COG_IS_SHELL (shell), FALSE);
+
+    /* Resolve every EGL/GBM/GLES entry point this platform uses directly
+     * from the Mali blob BEFORE anything else runs -- in particular,
+     * before wpe_loader_init() below, which loads WPEBackend-fdo and is
+     * suspected of triggering WebKit's own generic (Mesa-routed) EGL
+     * initialization elsewhere in the process. Doing this first ensures
+     * every EGL/GLES call this platform itself makes goes straight to
+     * Mali's own implementation, regardless of what any other vendor
+     * context WebKit sets up independently. */
+    if (!cog_mali_dispatch_init()) {
+        g_set_error_literal(error, COG_PLATFORM_WPE_ERROR, COG_PLATFORM_WPE_ERROR_INIT,
+                             "Failed to resolve Mali EGL/GBM/GLES symbols directly");
+        return FALSE;
+    }
 
     CogDrmPlatform *self = COG_DRM_PLATFORM(platform);
 
