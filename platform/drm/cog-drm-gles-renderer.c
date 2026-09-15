@@ -199,8 +199,14 @@ cog_drm_gles_renderer_initialize(CogDrmRenderer *renderer, GError **error)
         "EGL_KHR_image_base",
         "EGL_KHR_image",
     };
+    /* Same rationale as gl_has_extension_direct() in cog-gl-utils.c:
+     * epoxy_has_egl_extension() is a libepoxy function whose internal
+     * eglQueryString dispatch isn't reached by our cog-mali-dispatch.h
+     * macros (those only redirect bare identifiers Cog itself calls).
+     * Query the extension string directly instead. */
+    const char *egl_exts = eglQueryString(self->egl_display, EGL_EXTENSIONS);
     for (unsigned i = 0; i < G_N_ELEMENTS(required_egl_extensions); i++) {
-        if (!epoxy_has_egl_extension(self->egl_display, required_egl_extensions[i])) {
+        if (!egl_exts || !strstr(egl_exts, required_egl_extensions[i])) {
             g_set_error(error, COG_PLATFORM_WPE_ERROR, COG_PLATFORM_WPE_ERROR_INIT, "EGL extension %s missing",
                         required_egl_extensions[i]);
             return false;
