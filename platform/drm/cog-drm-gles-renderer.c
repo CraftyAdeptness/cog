@@ -95,14 +95,25 @@ cog_drm_gles_renderer_handle_egl_image(void *data, struct wpe_fdo_egl_exported_i
 
     struct gbm_bo *bo = gbm_surface_lock_front_buffer(self->gbm_surface);
 
-    uint32_t handles[4], strides[4], offsets[4];
-    uint64_t modifiers[4];
+    uint32_t handles[4] = {0}, strides[4] = {0}, offsets[4] = {0};
+    uint64_t modifiers[4] = {0};
+    unsigned  plane_count = 0;
 
-    for (unsigned i = 0; i < gbm_bo_get_plane_count(bo); i++) {
-        handles[i] = gbm_bo_get_handle_for_plane(bo, i).u32;
-        strides[i] = gbm_bo_get_stride_for_plane(bo, i);
-        offsets[i] = gbm_bo_get_offset(bo, i);
-        modifiers[i] = gbm_bo_get_modifier(bo);
+    /* Mali's own GBM implementation doesn't export the multi-plane
+     * query functions (see cog-mali-dispatch.c) -- only attempt this
+     * path if they were actually resolved. Otherwise plane_count stays
+     * 0 and we fall straight to the single-plane path below, exactly
+     * like the existing fallback for when drmModeAddFB2WithModifiers
+     * itself fails. */
+    if (cog_mali_gbm_bo_get_plane_count && cog_mali_gbm_bo_get_handle_for_plane &&
+        cog_mali_gbm_bo_get_stride_for_plane && cog_mali_gbm_bo_get_offset && cog_mali_gbm_bo_get_modifier) {
+        plane_count = gbm_bo_get_plane_count(bo);
+        for (unsigned i = 0; i < plane_count; i++) {
+            handles[i] = gbm_bo_get_handle_for_plane(bo, i).u32;
+            strides[i] = gbm_bo_get_stride_for_plane(bo, i);
+            offsets[i] = gbm_bo_get_offset(bo, i);
+            modifiers[i] = gbm_bo_get_modifier(bo);
+        }
     }
 
     /*

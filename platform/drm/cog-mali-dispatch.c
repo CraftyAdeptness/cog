@@ -174,6 +174,18 @@ void (*cog_mali_glVertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei
 void (*cog_mali_glActiveTexture)(GLenum);
 void (*cog_mali_glDrawArrays)(GLenum, GLint, GLsizei);
 
+#define DLSYM_OPT(h, n, v)                                                     \
+    do {                                                                      \
+        dlerror();                                                            \
+        *(void **) (&(v)) = dlsym((h), (n));                                  \
+        const char *_e = dlerror();                                           \
+        if (_e || !(v)) {                                                     \
+            fprintf(stderr, "cog-mali-dispatch: dlsym(%s) not available (optional): %s\n", (n), \
+                    _e ? _e : "symbol is NULL");                              \
+            (v) = NULL;                                                       \
+        }                                                                     \
+    } while (0)
+
 #define DLSYM_REQ(h, n, v)                                                     \
     do {                                                                      \
         dlerror();                                                            \
@@ -253,12 +265,20 @@ cog_mali_dispatch_init(void)
     DLSYM_REQ(mali, "gbm_surface_lock_front_buffer", cog_mali_gbm_surface_lock_front_buffer);
     DLSYM_REQ(mali, "gbm_surface_release_buffer", cog_mali_gbm_surface_release_buffer);
     DLSYM_REQ(mali, "gbm_bo_get_stride", cog_mali_gbm_bo_get_stride);
-    DLSYM_REQ(mali, "gbm_bo_get_stride_for_plane", cog_mali_gbm_bo_get_stride_for_plane);
-    DLSYM_REQ(mali, "gbm_bo_get_offset", cog_mali_gbm_bo_get_offset);
-    DLSYM_REQ(mali, "gbm_bo_get_plane_count", cog_mali_gbm_bo_get_plane_count);
     DLSYM_REQ(mali, "gbm_bo_get_handle", cog_mali_gbm_bo_get_handle);
-    DLSYM_REQ(mali, "gbm_bo_get_handle_for_plane", cog_mali_gbm_bo_get_handle_for_plane);
-    DLSYM_REQ(mali, "gbm_bo_get_modifier", cog_mali_gbm_bo_get_modifier);
+    /*
+     * Mali's own bundled GBM implementation (older Bifrost r13p0 blob)
+     * predates the multi-plane/DMA-BUF-modifier GBM API additions and
+     * does not export these -- they are OPTIONAL here. Callers must
+     * check the pointer for NULL before use and fall back to the
+     * simpler single-plane functions above (gbm_bo_get_stride /
+     * gbm_bo_get_handle), which Cog's DRM renderer already does.
+     */
+    DLSYM_OPT(mali, "gbm_bo_get_stride_for_plane", cog_mali_gbm_bo_get_stride_for_plane);
+    DLSYM_OPT(mali, "gbm_bo_get_offset", cog_mali_gbm_bo_get_offset);
+    DLSYM_OPT(mali, "gbm_bo_get_plane_count", cog_mali_gbm_bo_get_plane_count);
+    DLSYM_OPT(mali, "gbm_bo_get_handle_for_plane", cog_mali_gbm_bo_get_handle_for_plane);
+    DLSYM_OPT(mali, "gbm_bo_get_modifier", cog_mali_gbm_bo_get_modifier);
     DLSYM_REQ(mali, "gbm_bo_get_user_data", cog_mali_gbm_bo_get_user_data);
     DLSYM_REQ(mali, "gbm_bo_set_user_data", cog_mali_gbm_bo_set_user_data);
 
