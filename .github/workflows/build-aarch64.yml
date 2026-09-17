@@ -31,15 +31,30 @@ jobs:
                 libepoxy-dev libdrm-dev libinput-dev libudev-dev \
                 libgbm-dev libegl-dev libgles2-mesa-dev \
                 libglib2.0-dev libsoup-3.0-dev libmanette-0.2-dev \
-                libwayland-dev libwayland-server0
+                libwayland-dev libwayland-server0 \
+                libglvnd-core-dev
               cd /workspace
               meson setup build --prefix=/usr -Dplatforms=drm -Dexamples=false
               ninja -C build
+
+              echo "=== Building GLVND Mali vendor wrapper ==="
+              gcc -shared -fPIC -Wall -Wextra \
+                  -o libEGL_mali.so.0 \
+                  platform/drm/glvnd-mali/egl_vendor_mali.c -ldl
+
+              echo "=== Building isolated GLVND vendor check ==="
+              gcc -Wall -Wextra \
+                  -o check_glvnd_vendor \
+                  platform/drm/glvnd-mali/check_glvnd_vendor.c -lEGL -lGLESv2
+
               mkdir -p /workspace/artifacts
               cp build/launcher/cog /workspace/artifacts/ || true
               cp build/launcher/cogctl /workspace/artifacts/ || true
               find build -iname "*drm*.so*" -exec cp -v {} /workspace/artifacts/ \;
               find build -iname "libcogcore.so*" -exec cp -v {} /workspace/artifacts/ \;
+              cp -v libEGL_mali.so.0 /workspace/artifacts/
+              cp -v platform/drm/glvnd-mali/10_mali.json /workspace/artifacts/
+              cp -v check_glvnd_vendor /workspace/artifacts/
               echo "=== Verifying architecture of built artifacts ==="
               file /workspace/artifacts/*
             '
