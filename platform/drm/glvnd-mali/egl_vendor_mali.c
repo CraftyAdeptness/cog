@@ -41,9 +41,14 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+
+#include <gbm.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -96,6 +101,7 @@ static int mali_load(void)
         return 0;
     }
 
+    fprintf(stderr, "[egl_vendor_mali] mali_load() OK, handle=%p\n", mali_handle);
     return 1;
 }
 
@@ -105,20 +111,74 @@ static int mali_load(void)
 
 static const __EGLapiExports *g_exports = NULL;
 
+/* CONFIRMADO en el dispositivo (check_glvnd_vendor, primera prueba):
+ * pasarle eglGetDisplay(EGL_DEFAULT_DISPLAY) a Mali (native_display ==
+ * NULL) falla en eglInitialize con EGL_NOT_INITIALIZED (0x3001). A
+ * diferencia de Mesa, el blob de Mali no auto-detecta ni abre un nodo
+ * DRM por su cuenta cuando no le pasas nada -- necesita un
+ * gbm_device* real, exactamente como ya hace cog-mali-dispatch.c al
+ * abrir /dev/dri/card0 explícitamente. Por eso, cuando nos llega un
+ * "display por defecto" (native_display == NULL), creamos y cacheamos
+ * nuestro propio gbm_device en vez de pasarle NULL a Mali. */
+
+static struct gbm_device *mali_default_gbm = NULL;
+static int mali_default_gbm_fd = -1;
+
+static struct gbm_device *mali_get_default_gbm(void)
+{
+    if (mali_default_gbm)
+        return mali_default_gbm;
+
+    /* TODO: confirmar que card0 es el nodo correcto en este dispositivo
+     * (find_mali_blob.sh sección 7 solo mostró card0/card0-DSI-1, sin
+     * renderD128 listado ahí -- pero sí existe /dev/dri/renderD128
+     * según nm/otros diagnósticos previos; probar ambos si card0 falla). */
+    mali_default_gbm_fd = open("/dev/dri/card0", O_RDWR);
+    if (mali_default_gbm_fd < 0) {
+        fprintf(stderr, "[egl_vendor_mali] open(/dev/dri/card0) failed: %s\n", strerror(errno));
+        return NULL;
+    }
+
+    mali_default_gbm = gbm_create_device(mali_default_gbm_fd);
+    if (!mali_default_gbm) {
+        fprintf(stderr, "[egl_vendor_mali] gbm_create_device failed\n");
+        close(mali_default_gbm_fd);
+        mali_default_gbm_fd = -1;
+        return NULL;
+    }
+
+    return mali_default_gbm;
+}
+
 static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display,
                                            const EGLAttrib *attrib_list)
 {
-    (void) platform;
     (void) attrib_list;
+
+    fprintf(stderr, "[egl_vendor_mali] getPlatformDisplay(platform=0x%x, native_display=%p)\n",
+            platform, native_display);
 
     if (!mali_load())
         return EGL_NO_DISPLAY;
 
-    /* Ver nota grande al inicio del archivo: el blob no distingue
-     * "platform", así que siempre delegamos a eglGetDisplay clásico
-     * con el native_display tal cual nos llegue (EGL_DEFAULT_DISPLAY,
-     * un gbm_device*, etc.) -- Mali lo autodetecta internamente. */
-    return real_eglGetDisplay((EGLNativeDisplayType) native_display);
+    EGLDisplay dpy;
+
+    /* Si ya nos pasan un native_display real (p.ej. un gbm_device*
+     * explícito de la propia app), lo respetamos tal cual. Solo
+     * sintetizamos uno cuando viene NULL (display "por defecto"). */
+    if (native_display != NULL) {
+        dpy = real_eglGetDisplay((EGLNativeDisplayType) native_display);
+    } else {
+        struct gbm_device *gbm = mali_get_default_gbm();
+        if (!gbm) {
+            fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() failed\n");
+            return EGL_NO_DISPLAY;
+        }
+        dpy = real_eglGetDisplay((EGLNativeDisplayType) gbm);
+    }
+
+    fprintf(stderr, "[egl_vendor_mali] getPlatformDisplay -> %p\n", (void *) dpy);
+    return dpy;
 }
 
 static EGLBoolean mali_getSupportsAPI(EGLenum api)
@@ -162,6 +222,8 @@ EGLBoolean __egl_Main(uint32_t version, const __EGLapiExports *exports,
                        __EGLvendorInfo *vendor, __EGLapiImports *imports)
 {
     (void) vendor;
+
+    fprintf(stderr, "[egl_vendor_mali] __egl_Main called, version=0x%x\n", version);
 
     if (EGL_VENDOR_ABI_GET_MAJOR_VERSION(version) != EGL_VENDOR_ABI_MAJOR_VERSION) {
         fprintf(stderr, "[egl_vendor_mali] ABI major version mismatch (got %u, want %u)\n",

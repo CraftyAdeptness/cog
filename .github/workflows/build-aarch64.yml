@@ -40,7 +40,7 @@ jobs:
               echo "=== Building GLVND Mali vendor wrapper ==="
               gcc -shared -fPIC -Wall -Wextra \
                   -o libEGL_mali.so.0 \
-                  platform/drm/glvnd-mali/egl_vendor_mali.c -ldl
+                  platform/drm/glvnd-mali/egl_vendor_mali.c -ldl -lgbm
 
               echo "=== Building isolated GLVND vendor check ==="
               gcc -Wall -Wextra \
