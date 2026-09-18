@@ -161,21 +161,26 @@ static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display
     if (!mali_load())
         return EGL_NO_DISPLAY;
 
-    EGLDisplay dpy;
-
-    /* Si ya nos pasan un native_display real (p.ej. un gbm_device*
-     * explícito de la propia app), lo respetamos tal cual. Solo
-     * sintetizamos uno cuando viene NULL (display "por defecto"). */
-    if (native_display != NULL) {
-        dpy = real_eglGetDisplay((EGLNativeDisplayType) native_display);
-    } else {
-        struct gbm_device *gbm = mali_get_default_gbm();
-        if (!gbm) {
-            fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() failed\n");
-            return EGL_NO_DISPLAY;
-        }
-        dpy = real_eglGetDisplay((EGLNativeDisplayType) gbm);
+    /* CONFIRMADO en el WebProcess real: WPEBackend-fdo siempre pide
+     * EGL_PLATFORM_WAYLAND_KHR (0x31d8) con un native_display propio
+     * (un wl_display sintético que arma internamente, sin compositor
+     * real detrás), incluso corriendo sobre el backend DRM puro de
+     * Cog. Pasarle ese puntero a Mali directamente no sirve de nada
+     * -- Mali no entiende Wayland, solo GBM -- y devolvía EGL_NO_DISPLAY,
+     * lo que hacía que GLVND cayera a Mesa (y ahí terminaba fallando
+     * eglCreateContext con EGL_BAD_MATCH, produciendo el "no provider
+     * of glViewport/glTexParameteri" original).
+     *
+     * En este dispositivo solo existe UNA pantalla real, vía DRM/GBM.
+     * No importa qué "platform" o native_display diga pedir GLVND:
+     * siempre usamos nuestro propio gbm_device sintético. */
+    struct gbm_device *gbm = mali_get_default_gbm();
+    if (!gbm) {
+        fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() failed\n");
+        return EGL_NO_DISPLAY;
     }
+
+    EGLDisplay dpy = real_eglGetDisplay((EGLNativeDisplayType) gbm);
 
     fprintf(stderr, "[egl_vendor_mali] getPlatformDisplay -> %p\n", (void *) dpy);
     return dpy;
