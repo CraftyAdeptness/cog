@@ -246,12 +246,14 @@ static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display
 
 static EGLBoolean mali_getSupportsAPI(EGLenum api)
 {
+    fprintf(stderr, "[egl_vendor_mali] getSupportsAPI(api=0x%x)\n", api);
     /* El blob es GLES-only en este dispositivo. */
     return (api == EGL_OPENGL_ES_API) ? EGL_TRUE : EGL_FALSE;
 }
 
 static void *mali_getProcAddress(const char *procname)
 {
+    fprintf(stderr, "[egl_vendor_mali] getProcAddress(%s)\n", procname ? procname : "(null)");
     if (!mali_load())
         return NULL;
 
@@ -263,6 +265,7 @@ static void *mali_getProcAddress(const char *procname)
 
 static void *mali_getDispatchAddress(const char *procname)
 {
+    fprintf(stderr, "[egl_vendor_mali] getDispatchAddress(%s)\n", procname ? procname : "(null)");
     /* Sin despacho de extensiones EGL a nivel display por ahora.
      * Suficiente para levantar contexto GLES básico; hay que revisar
      * si WebKit necesita alguna EGL display extension puntual
@@ -273,6 +276,7 @@ static void *mali_getDispatchAddress(const char *procname)
 
 static void mali_setDispatchIndex(const char *procname, int index)
 {
+    fprintf(stderr, "[egl_vendor_mali] setDispatchIndex(%s, %d)\n", procname ? procname : "(null)", index);
     (void) procname;
     (void) index;
 }
@@ -294,7 +298,8 @@ static void mali_setDispatchIndex(const char *procname, int index)
  * en este hardware. */
 static EGLenum mali_findNativeDisplayPlatform(void *native_display)
 {
-    (void) native_display;
+    fprintf(stderr, "[egl_vendor_mali] findNativeDisplayPlatform(native_display=%p) -> EGL_PLATFORM_GBM_KHR\n",
+            native_display);
     return EGL_PLATFORM_GBM_KHR;
 }
 
