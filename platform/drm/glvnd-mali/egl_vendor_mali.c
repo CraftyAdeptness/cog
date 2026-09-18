@@ -126,6 +126,8 @@ static int mali_default_gbm_fd = -1;
 
 static struct gbm_device *mali_get_default_gbm(void)
 {
+    fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() ENTERED (build marker: always-gbm-v2)\n");
+
     if (mali_default_gbm)
         return mali_default_gbm;
 
