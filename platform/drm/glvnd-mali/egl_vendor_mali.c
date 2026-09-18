@@ -186,6 +186,8 @@ static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display
     if (!mali_load())
         return EGL_NO_DISPLAY;
 
+    struct gbm_device *gbm = NULL;
+
     /* CONFIRMADO en el WebProcess real: WPEBackend-fdo siempre pide
      * EGL_PLATFORM_WAYLAND_KHR (0x31d8) con un native_display propio
      * (un wl_display sintético que arma internamente, sin compositor
@@ -194,15 +196,35 @@ static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display
      * -- Mali no entiende Wayland, solo GBM -- y devolvía EGL_NO_DISPLAY,
      * lo que hacía que GLVND cayera a Mesa (y ahí terminaba fallando
      * eglCreateContext con EGL_BAD_MATCH, produciendo el "no provider
-     * of glViewport/glTexParameteri" original).
+     * of glViewport/glTexParameteri" original). Para ESE caso seguimos
+     * ignorando el puntero y sustituyendo nuestro propio gbm_device
+     * sintético.
      *
-     * En este dispositivo solo existe UNA pantalla real, vía DRM/GBM.
-     * No importa qué "platform" o native_display diga pedir GLVND:
-     * siempre usamos nuestro propio gbm_device sintético. */
-    struct gbm_device *gbm = mali_get_default_gbm();
-    if (!gbm) {
-        fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() failed\n");
-        return EGL_NO_DISPLAY;
+     * NUEVO (sesión Qt/eglfs): un llamador que pide genuinamente
+     * EGL_PLATFORM_GBM_KHR con un native_display no-NULL (p.ej. el
+     * plugin eglfs-kms de Qt, que ya creó su propio gbm_device real
+     * sobre /dev/dri/card0 para hacer scanout y que va a construir
+     * gbm_surface's contra ESE mismo device) nos está pasando un
+     * puntero legítimo y utilizable. Si en ese caso lo ignoramos y
+     * devolvemos un EGLDisplay atado a un gbm_device distinto (el
+     * nuestro, sintetizado sobre renderD128), eglCreateWindowSurface
+     * más adelante va a fallar por el mismatch entre el gbm_surface
+     * (creado contra el device de Qt) y el EGLDisplay (creado contra
+     * el nuestro). Por eso: solo sustituimos el native_display cuando
+     * es Wayland (el caso sintético de arriba) o cuando viene NULL; si
+     * ya es un gbm_device real para una plataforma GBM, lo respetamos
+     * tal cual. */
+    if (platform == EGL_PLATFORM_WAYLAND_KHR || !native_display) {
+        gbm = mali_get_default_gbm();
+        if (!gbm) {
+            fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() failed\n");
+            return EGL_NO_DISPLAY;
+        }
+    } else {
+        fprintf(stderr, "[egl_vendor_mali] honoring caller-provided native_display=%p "
+                "for platform=0x%x (not substituting our own gbm_device)\n",
+                native_display, platform);
+        gbm = (struct gbm_device *) native_display;
     }
 
     EGLDisplay dpy = real_eglGetDisplay((EGLNativeDisplayType) gbm);
@@ -255,6 +277,27 @@ static void mali_setDispatchIndex(const char *procname, int index)
     (void) index;
 }
 
+/* CONFIRMADO (sesión Qt/eglfs): sin esto, el eglGetDisplay() clásico
+ * (EGL 1.4, el que usa el plugin eglfs-kms de Qt en vez de
+ * eglGetPlatformDisplay) nunca llega a nuestro vendor -- GLVND no
+ * tiene forma de saber que un native_display arbitrario (un
+ * gbm_device* en este caso) le corresponde a Mali en vez de a Mesa, y
+ * eglGetDisplay() termina devolviendo EGL_NO_DISPLAY sin que aparezca
+ * NINGÚN log nuestro (ni siquiera "getPlatformDisplay(...)"), que es
+ * justo el síntoma que vimos: "Could not open EGL display" impreso
+ * por Qt mismo, sin rastro de este wrapper en el log.
+ *
+ * En este dispositivo solo hay una plataforma real (GBM/DRM), así que
+ * reclamamos cualquier native_display sin necesidad de inspeccionarlo
+ * -- si más adelante conviven Mesa y Mali para casos distintos habría
+ * que afinar esto, pero por ahora Mali es el único vendor funcional
+ * en este hardware. */
+static EGLenum mali_findNativeDisplayPlatform(void *native_display)
+{
+    (void) native_display;
+    return EGL_PLATFORM_GBM_KHR;
+}
+
 /* ------------------------------------------------------------------ */
 /* Entry point exigido por GLVND                                       */
 /* ------------------------------------------------------------------ */
@@ -280,13 +323,11 @@ EGLBoolean __egl_Main(uint32_t version, const __EGLapiExports *exports,
     imports->getProcAddress      = mali_getProcAddress;
     imports->getDispatchAddress  = mali_getDispatchAddress;
     imports->setDispatchIndex    = mali_setDispatchIndex;
+    imports->findNativeDisplayPlatform = mali_findNativeDisplayPlatform;
 
-    /* Optativos que dejamos NULL por ahora:
+    /* Optativos que siguen en NULL por ahora:
      *   getVendorString, isPatchSupported/initiatePatch/releasePatch,
-     *   patchThreadAttach, findNativeDisplayPlatform.
-     * findNativeDisplayPlatform podría valer la pena implementarlo
-     * después para que eglGetDisplay(gbm_device) nos identifique
-     * directo como vendor sin pasar por Mesa primero. */
+     *   patchThreadAttach. */
 
     return EGL_TRUE;
 }
