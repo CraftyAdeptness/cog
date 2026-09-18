@@ -111,45 +111,65 @@ static int mali_load(void)
 
 static const __EGLapiExports *g_exports = NULL;
 
-/* CONFIRMADO en el dispositivo (check_glvnd_vendor, primera prueba):
- * pasarle eglGetDisplay(EGL_DEFAULT_DISPLAY) a Mali (native_display ==
- * NULL) falla en eglInitialize con EGL_NOT_INITIALIZED (0x3001). A
- * diferencia de Mesa, el blob de Mali no auto-detecta ni abre un nodo
- * DRM por su cuenta cuando no le pasas nada -- necesita un
- * gbm_device* real, exactamente como ya hace cog-mali-dispatch.c al
- * abrir /dev/dri/card0 explícitamente. Por eso, cuando nos llega un
- * "display por defecto" (native_display == NULL), creamos y cacheamos
- * nuestro propio gbm_device en vez de pasarle NULL a Mali. */
+/* CONFIRMADO en el dispositivo, en dos pasos:
+ *
+ * 1) (check_glvnd_vendor, primera prueba) pasarle
+ *    eglGetDisplay(EGL_DEFAULT_DISPLAY) a Mali (native_display == NULL)
+ *    falla en eglInitialize con EGL_NOT_INITIALIZED (0x3001). A
+ *    diferencia de Mesa, el blob de Mali no auto-detecta ni abre un nodo
+ *    DRM por su cuenta cuando no le pasas nada -- necesita un
+ *    gbm_device* real.
+ *
+ * 2) (WPEWebProcess real, con Cog ya corriendo como DRM master en
+ *    /dev/dri/card0 para el scanout) usar el nodo PRIMARIO (card0)
+ *    desde este proceso secundario hace que Mali rechace el
+ *    eglGetDisplay (devuelve NULL sin error explícito) -- Mali
+ *    detecta que el master de ese nodo ya lo tiene otro proceso.
+ *    WPEWebProcess no hace scanout, solo necesita un contexto GLES
+ *    para renderizar a un buffer que Cog compone después -- exactamente
+ *    para lo que existen los RENDER NODES (renderD1xx): acceso a la
+ *    GPU sin ninguna noción de master/mode-setting, sin contienda con
+ *    quien sí es master del nodo primario.
+ *
+ * Por eso: preferimos /dev/dri/renderD128 siempre que exista, y solo
+ * caemos a /dev/dri/card0 como respaldo (útil para pruebas aisladas
+ * tipo check_glvnd_vendor donde no hay ningún otro proceso siendo
+ * master de nada). */
 
 static struct gbm_device *mali_default_gbm = NULL;
 static int mali_default_gbm_fd = -1;
 
 static struct gbm_device *mali_get_default_gbm(void)
 {
-    fprintf(stderr, "[egl_vendor_mali] mali_get_default_gbm() ENTERED (build marker: always-gbm-v2)\n");
-
     if (mali_default_gbm)
         return mali_default_gbm;
 
-    /* TODO: confirmar que card0 es el nodo correcto en este dispositivo
-     * (find_mali_blob.sh sección 7 solo mostró card0/card0-DSI-1, sin
-     * renderD128 listado ahí -- pero sí existe /dev/dri/renderD128
-     * según nm/otros diagnósticos previos; probar ambos si card0 falla). */
-    mali_default_gbm_fd = open("/dev/dri/card0", O_RDWR);
-    if (mali_default_gbm_fd < 0) {
-        fprintf(stderr, "[egl_vendor_mali] open(/dev/dri/card0) failed: %s\n", strerror(errno));
-        return NULL;
+    static const char *const candidates[] = {
+        "/dev/dri/renderD128",
+        "/dev/dri/card0",
+    };
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        mali_default_gbm_fd = open(candidates[i], O_RDWR);
+        if (mali_default_gbm_fd < 0) {
+            fprintf(stderr, "[egl_vendor_mali] open(%s) failed: %s\n",
+                    candidates[i], strerror(errno));
+            continue;
+        }
+
+        mali_default_gbm = gbm_create_device(mali_default_gbm_fd);
+        if (!mali_default_gbm) {
+            fprintf(stderr, "[egl_vendor_mali] gbm_create_device(%s) failed\n", candidates[i]);
+            close(mali_default_gbm_fd);
+            mali_default_gbm_fd = -1;
+            continue;
+        }
+
+        fprintf(stderr, "[egl_vendor_mali] using %s for gbm_device\n", candidates[i]);
+        return mali_default_gbm;
     }
 
-    mali_default_gbm = gbm_create_device(mali_default_gbm_fd);
-    if (!mali_default_gbm) {
-        fprintf(stderr, "[egl_vendor_mali] gbm_create_device failed\n");
-        close(mali_default_gbm_fd);
-        mali_default_gbm_fd = -1;
-        return NULL;
-    }
-
-    return mali_default_gbm;
+    return NULL;
 }
 
 static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display,
