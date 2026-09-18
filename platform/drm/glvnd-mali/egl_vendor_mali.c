@@ -64,10 +64,12 @@ static void *mali_handle = NULL;
 typedef EGLDisplay (*PFN_eglGetDisplay)(EGLNativeDisplayType);
 typedef EGLBoolean (*PFN_eglBindAPI)(EGLenum);
 typedef void *(*PFN_eglGetProcAddress)(const char *);
+typedef EGLint (*PFN_eglGetError)(void);
 
 static PFN_eglGetDisplay      real_eglGetDisplay;
 static PFN_eglBindAPI         real_eglBindAPI;
 static PFN_eglGetProcAddress  real_eglGetProcAddress;
+static PFN_eglGetError        real_eglGetError;
 
 static int mali_load(void)
 {
@@ -87,6 +89,7 @@ static int mali_load(void)
     real_eglGetDisplay     = (PFN_eglGetDisplay)     dlsym(mali_handle, "eglGetDisplay");
     real_eglBindAPI        = (PFN_eglBindAPI)        dlsym(mali_handle, "eglBindAPI");
     real_eglGetProcAddress = (PFN_eglGetProcAddress) dlsym(mali_handle, "eglGetProcAddress");
+    real_eglGetError       = (PFN_eglGetError)       dlsym(mali_handle, "eglGetError");
 
     /* Los tres símbolos anteriores SÍ aparecieron limpios en el
      * .dynsym (confirmado con nm -D y readelf --dyn-syms), a
@@ -203,6 +206,17 @@ static EGLDisplay mali_getPlatformDisplay(EGLenum platform, void *native_display
     }
 
     EGLDisplay dpy = real_eglGetDisplay((EGLNativeDisplayType) gbm);
+
+    if (dpy == EGL_NO_DISPLAY && real_eglGetError) {
+        /* El eglGetError() de GLVND (el que ve check_glvnd_vendor) no
+         * sirve aquí -- antes de que un display quede seleccionado,
+         * GLVND reporta su propio estado neutral, no el interno del
+         * vendor. Llamamos al eglGetError() DE MALI directamente para
+         * ver si el blob mismo dejó algún código específico. */
+        EGLint mali_err = real_eglGetError();
+        fprintf(stderr, "[egl_vendor_mali] Mali's own eglGetError() after failed eglGetDisplay: 0x%x\n",
+                mali_err);
+    }
 
     fprintf(stderr, "[egl_vendor_mali] getPlatformDisplay -> %p\n", (void *) dpy);
     return dpy;
