@@ -303,6 +303,29 @@ static EGLenum mali_findNativeDisplayPlatform(void *native_display)
     return EGL_PLATFORM_GBM_KHR;
 }
 
+/* CONFIRMADO por el propio header (libeglabi.h, comentario sobre
+ * getPlatformDisplay): "If libEGL can't figure out which vendor to
+ * use on its own, then it will go through the list of available
+ * vendor libraries and call this function until one succeeds." Esto
+ * implica el inverso: SI GLVND SÍ puede "figurarse" qué vendor usar
+ * -- vía qué vendors anunciaron soporte para una extensión de
+ * plataforma dada, a través de getVendorString(__EGL_VENDOR_STRING_
+ * PLATFORM_EXTENSIONS) -- entonces NO prueba con el resto. Como
+ * nunca implementamos getVendorString, Mali nunca quedó registrado
+ * como soporte de "EGL_KHR_platform_gbm"/"EGL_EXT_platform_base" --
+ * solo Mesa lo anuncia (siempre lo hizo). Eso explica el silencio
+ * total de mali_getPlatformDisplay en TODOS los tests con Qt: GLVND
+ * "ya sabía" que debía usar Mesa (el único vendor que dijo soportar
+ * esa plataforma) y nunca llegó a intentar con nosotros, sin importar
+ * el orden de prioridad 10_/50_ de los .json. */
+static const char *mali_getVendorString(int name)
+{
+    fprintf(stderr, "[egl_vendor_mali] getVendorString(name=%d)\n", name);
+    if (name == __EGL_VENDOR_STRING_PLATFORM_EXTENSIONS)
+        return "EGL_KHR_platform_gbm EGL_EXT_platform_base";
+    return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* Entry point exigido por GLVND                                       */
 /* ------------------------------------------------------------------ */
@@ -329,10 +352,10 @@ EGLBoolean __egl_Main(uint32_t version, const __EGLapiExports *exports,
     imports->getDispatchAddress  = mali_getDispatchAddress;
     imports->setDispatchIndex    = mali_setDispatchIndex;
     imports->findNativeDisplayPlatform = mali_findNativeDisplayPlatform;
+    imports->getVendorString      = mali_getVendorString;
 
     /* Optativos que siguen en NULL por ahora:
-     *   getVendorString, isPatchSupported/initiatePatch/releasePatch,
-     *   patchThreadAttach. */
+     *   isPatchSupported/initiatePatch/releasePatch, patchThreadAttach. */
 
     return EGL_TRUE;
 }
